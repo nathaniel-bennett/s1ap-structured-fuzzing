@@ -12,7 +12,7 @@ struct structured_output {
 
 // Converts arbitrary unstructured bytes into a structured S1AP message.
 // Returns a the number of structured output buffers written to in `out`, or
-// a negative error code on failure. Note that a maximum of 8 buffers may
+// a negative error code on failure. Note that a maximum of 6 buffers may
 // be written to.
 long s1ap_arbitrary_to_multistructured(char *buf_in, long in_len, struct structured_output *out, long out_len);
 
