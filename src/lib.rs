@@ -7,56 +7,20 @@ use std::os::raw::{c_char, c_uint};
 use arbitrary::{Arbitrary, Unstructured};
 
 
-#[derive(arbitrary::Arbitrary, Debug)]
-enum OgsInitMessage {
-//    M1(s1ap::InitiatingMessage),
-    M2(s1ap::S1SetupRequest),
-    M3(s1ap::InitialUEMessage),
-    M4(s1ap::UplinkNASTransport),
-    M5(s1ap::UECapabilityInfoIndication),
-    M6(s1ap::UEContextReleaseRequest),
-    M7(s1ap::PathSwitchRequest),
-    M8(s1ap::ENBConfigurationTransfer),
-    M9(s1ap::HandoverRequired),
-    M10(s1ap::HandoverCancel),
-    M11(s1ap::ENBStatusTransfer),
-    M12(s1ap::HandoverNotify),
-    M13(s1ap::Reset),
-    M14(s1ap::ErrorIndication),
-    M15(s1ap::NASNonDeliveryIndication),
-    M17(s1ap::E_RABModificationIndication),
-}
-
-#[derive(arbitrary::Arbitrary, Debug)]
-enum OgsSuccessfulMessage {
-    M1(s1ap::InitialContextSetupResponse),
-    M2(s1ap::UEContextModificationResponse),
-    M3(s1ap::UEContextReleaseComplete),
-    M4(s1ap::E_RABSetupResponse),
-    M5(s1ap::HandoverRequestAcknowledge),
-    M6(s1ap::WriteReplaceWarningResponse),
-    M7(s1ap::KillResponse),
-}
-
-#[derive(arbitrary::Arbitrary, Debug)]
-enum OgsUnsuccessfulMessage {
-    M1(s1ap::InitialContextSetupFailure),
-    M2(s1ap::UEContextModificationFailure),
-    M3(s1ap::HandoverFailure),
-}
-
-
-#[derive(arbitrary::Arbitrary, Debug)]
-enum OgsMessage {
-    M1(OgsInitMessage),
-    M2(OgsSuccessfulMessage),
-    M3(OgsUnsuccessfulMessage),
-}
-
-
 /// An arbitrary sequence of messages
-#[derive(arbitrary::Arbitrary, Debug)]
-struct OgsMessages(Vec<OgsMessage>);
+#[derive(Debug)]
+struct OgsMessages(Vec<s1ap::S1AP_PDU>);
+
+impl<'a> arbitrary::Arbitrary<'a> for OgsMessages {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let vec_length = u.int_in_range(0..=6)?;
+        let mut v = Vec::new();
+        for _ in 0..vec_length {
+            v.push(u.arbitrary()?);
+        }
+        Ok(OgsMessages(v))
+    }
+}
 
 // const S1AP_ERR_UNSPECIFIED: isize = -1;
 const S1AP_ERR_INVALID_ARG: isize = -2;
@@ -79,222 +43,13 @@ pub unsafe extern "C" fn s1ap_arbitrary_to_structured(buf_in: *mut c_char, in_le
     let in_slice = std::slice::from_raw_parts(buf_in as *const u8, in_len);
     let out_slice = std::slice::from_raw_parts_mut(buf_out as *mut u8, out_max);
 
-    let s1ap_message = match OgsMessage::arbitrary(&mut Unstructured::new(in_slice)) {
+    let s1ap_message = match s1ap::S1AP_PDU::arbitrary(&mut Unstructured::new(in_slice)) {
         Ok(msg) => msg,
         Err(_) => return S1AP_ERR_ARBITRARY_FAIL,
     };
 
     let mut encoded = asn1_codecs::PerCodecData::new_aper();
-    let encode_res = match s1ap_message {
-        OgsMessage::M1(m) => match m {
-            OgsInitMessage::M2(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(17),
-                    criticality: s1ap::Criticality(s1ap::Criticality::REJECT),
-                    value: s1ap::InitiatingMessageValue::Id_S1Setup(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M3(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(12),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_initialUEMessage(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M4(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(13),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_uplinkNASTransport(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M5(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(22),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_UECapabilityInfoIndication(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M6(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(22),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_UEContextReleaseRequest(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M7(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(3),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_PathSwitchRequest(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M8(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(40),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_eNBConfigurationTransfer(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M9(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(0),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_HandoverPreparation(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M10(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(4),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_HandoverCancel(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M11(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(24),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_eNBStatusTransfer(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M12(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(2),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_HandoverNotification(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M13(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(14),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_Reset(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M14(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(15),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_ErrorIndication(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M15(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(16),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_NASNonDeliveryIndication(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsInitMessage::M17(a) => {
-                let im = s1ap::S1AP_PDU::InitiatingMessage(s1ap::InitiatingMessage {
-                    procedure_code: s1ap::ProcedureCode(50),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::InitiatingMessageValue::Id_E_RABModificationIndication(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-        },
-            OgsMessage::M2(m) => match m {
-            OgsSuccessfulMessage::M1(a) => {
-                let im = s1ap::S1AP_PDU::SuccessfulOutcome(s1ap::SuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(9),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::SuccessfulOutcomeValue::Id_InitialContextSetup(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsSuccessfulMessage::M2(a) => {
-                let im = s1ap::S1AP_PDU::SuccessfulOutcome(s1ap::SuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(21),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::SuccessfulOutcomeValue::Id_UEContextModification(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsSuccessfulMessage::M3(a) => {
-                let im = s1ap::S1AP_PDU::SuccessfulOutcome(s1ap::SuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(23),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::SuccessfulOutcomeValue::Id_UEContextRelease(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsSuccessfulMessage::M4(a) => {
-                let im = s1ap::S1AP_PDU::SuccessfulOutcome(s1ap::SuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(5),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::SuccessfulOutcomeValue::Id_E_RABSetup(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsSuccessfulMessage::M5(a) => {
-                let im = s1ap::S1AP_PDU::SuccessfulOutcome(s1ap::SuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(1),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::SuccessfulOutcomeValue::Id_HandoverResourceAllocation(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsSuccessfulMessage::M6(a) => {
-                let im = s1ap::S1AP_PDU::SuccessfulOutcome(s1ap::SuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(36),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::SuccessfulOutcomeValue::Id_WriteReplaceWarning(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsSuccessfulMessage::M7(a) => {
-                let im = s1ap::S1AP_PDU::SuccessfulOutcome(s1ap::SuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(43),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::SuccessfulOutcomeValue::Id_Kill(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-        },
-            OgsMessage::M3(m) => match m {
-            OgsUnsuccessfulMessage::M1(a) => {
-                let im = s1ap::S1AP_PDU::UnsuccessfulOutcome(s1ap::UnsuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(9),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::UnsuccessfulOutcomeValue::Id_InitialContextSetup(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsUnsuccessfulMessage::M2(a) => {
-                let im = s1ap::S1AP_PDU::UnsuccessfulOutcome(s1ap::UnsuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(21),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::UnsuccessfulOutcomeValue::Id_UEContextModification(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-            OgsUnsuccessfulMessage::M3(a) => {
-                let im = s1ap::S1AP_PDU::UnsuccessfulOutcome(s1ap::UnsuccessfulOutcome {
-                    procedure_code: s1ap::ProcedureCode(1),
-                    criticality: s1ap::Criticality(s1ap::Criticality::IGNORE),
-                    value: s1ap::UnsuccessfulOutcomeValue::Id_HandoverResourceAllocation(a),
-                });
-                im.aper_encode(&mut encoded)
-            },
-        }
-    };
-
-    match encode_res {
+    match s1ap_message.aper_encode(&mut encoded) {
         Ok(()) => (),
         _ => return S1AP_ERR_APER_ENCODING // If the encoding isn't successful, short-circuit this test
     }
@@ -312,6 +67,53 @@ pub unsafe extern "C" fn s1ap_arbitrary_to_structured(buf_in: *mut c_char, in_le
         Err(_) => S1AP_ERR_OUTPUT_TRUNC
     }
 }
+
+/*
+#[no_mangle]
+pub unsafe extern "C" fn s1ap_arbitrary_to_multi(buf_in: *mut c_char, in_len: isize, buf_out: *mut *mut c_char, out_max: isize, out_cnt: isize) -> isize {
+    let in_len: usize = match in_len.try_into() {
+        Ok(l) => l,
+        Err(_) => return S1AP_ERR_INVALID_ARG,
+    };
+
+    let out_max: usize = match out_max.try_into() {
+        Ok(l) => l,
+        Err(_) => return S1AP_ERR_INVALID_ARG,
+    };
+
+    let out_cnt: usize = match out_cnt.try_into() {
+        Ok(l) => l,
+        Err(_) => return S1AP_ERR_INVALID_ARG,
+    };
+
+    let in_slice = std::slice::from_raw_parts(buf_in as *const u8, in_len);
+    let out_slice = std::slice::from_raw_parts_mut(buf_out as *mut u8, out_max);
+
+    let s1ap_message = match s1ap::S1AP_PDU::arbitrary(&mut Unstructured::new(in_slice)) {
+        Ok(msg) => msg,
+        Err(_) => return S1AP_ERR_ARBITRARY_FAIL,
+    };
+
+    let mut encoded = asn1_codecs::PerCodecData::new_aper();
+    match s1ap_message.aper_encode(&mut encoded) {
+        Ok(()) => (),
+        _ => return S1AP_ERR_APER_ENCODING // If the encoding isn't successful, short-circuit this test
+    }
+
+    let aper_message_bytes = encoded.into_bytes();
+    let aper_message_slice = aper_message_bytes.as_slice();
+    if aper_message_slice.len() > out_max {
+        return S1AP_ERR_OUTPUT_TRUNC
+    }
+
+    out_slice[..aper_message_slice.len()].copy_from_slice(aper_message_slice);
+
+    match aper_message_slice.len().try_into() {
+        Ok(l) => l,
+        Err(_) => S1AP_ERR_OUTPUT_TRUNC
+    }
+}
+*/
 
 #[no_mangle]
 pub unsafe extern "C" fn s1ap_msg_len(buf_in: *mut c_char, in_len: isize) -> isize {
