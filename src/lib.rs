@@ -68,52 +68,61 @@ pub unsafe extern "C" fn s1ap_arbitrary_to_structured(buf_in: *mut c_char, in_le
     }
 }
 
-/*
+#[repr(C)]
+pub struct StructuredOutput {
+    buf: *mut c_char,
+    len: isize,
+}
+
 #[no_mangle]
-pub unsafe extern "C" fn s1ap_arbitrary_to_multi(buf_in: *mut c_char, in_len: isize, buf_out: *mut *mut c_char, out_max: isize, out_cnt: isize) -> isize {
+pub unsafe extern "C" fn s1ap_arbitrary_to_multistructured(buf_in: *mut c_char, in_len: isize, buf_out: *mut StructuredOutput, out_len: isize) -> isize {
     let in_len: usize = match in_len.try_into() {
         Ok(l) => l,
         Err(_) => return S1AP_ERR_INVALID_ARG,
     };
 
-    let out_max: usize = match out_max.try_into() {
-        Ok(l) => l,
-        Err(_) => return S1AP_ERR_INVALID_ARG,
-    };
-
-    let out_cnt: usize = match out_cnt.try_into() {
+    let out_len: usize = match out_len.try_into() {
         Ok(l) => l,
         Err(_) => return S1AP_ERR_INVALID_ARG,
     };
 
     let in_slice = std::slice::from_raw_parts(buf_in as *const u8, in_len);
-    let out_slice = std::slice::from_raw_parts_mut(buf_out as *mut u8, out_max);
+    let messages_slice = std::slice::from_raw_parts_mut(buf_out, out_len);
 
-    let s1ap_message = match s1ap::S1AP_PDU::arbitrary(&mut Unstructured::new(in_slice)) {
+    let s1ap_messages = match OgsMessages::arbitrary(&mut Unstructured::new(in_slice)) {
         Ok(msg) => msg,
         Err(_) => return S1AP_ERR_ARBITRARY_FAIL,
     };
 
-    let mut encoded = asn1_codecs::PerCodecData::new_aper();
-    match s1ap_message.aper_encode(&mut encoded) {
-        Ok(()) => (),
-        _ => return S1AP_ERR_APER_ENCODING // If the encoding isn't successful, short-circuit this test
+    let mut idx = 0;
+    for message in s1ap_messages.0.iter() {
+        if idx >= messages_slice.len() {
+            break
+        }
+
+        let out_slice = std::slice::from_raw_parts_mut(messages_slice[idx].buf as *mut u8, messages_slice[idx].len as usize);
+        
+        let mut encoded = asn1_codecs::PerCodecData::new_aper();
+        match message.aper_encode(&mut encoded) {
+            Ok(()) => (),
+            _ => {
+                continue
+                // If the encoding isn't successful, skip the message
+            }
+        }
+        
+        let aper_message_bytes = encoded.into_bytes();
+        let aper_message_slice = aper_message_bytes.as_slice();
+        if aper_message_slice.len() > out_len {
+            continue
+        }
+
+        out_slice[..aper_message_slice.len()].copy_from_slice(aper_message_slice);
+        idx += 1
     }
 
-    let aper_message_bytes = encoded.into_bytes();
-    let aper_message_slice = aper_message_bytes.as_slice();
-    if aper_message_slice.len() > out_max {
-        return S1AP_ERR_OUTPUT_TRUNC
-    }
-
-    out_slice[..aper_message_slice.len()].copy_from_slice(aper_message_slice);
-
-    match aper_message_slice.len().try_into() {
-        Ok(l) => l,
-        Err(_) => S1AP_ERR_OUTPUT_TRUNC
-    }
+    idx as isize
 }
-*/
 
 #[no_mangle]
 pub unsafe extern "C" fn s1ap_msg_len(buf_in: *mut c_char, in_len: isize) -> isize {
