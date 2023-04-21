@@ -15,8 +15,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "s1apstructured.h"
-
 #define MAX_FUZZ_LENGTH 100000
 #define NET_PORT 36412
 #define NET_IP "10.140.96.10"

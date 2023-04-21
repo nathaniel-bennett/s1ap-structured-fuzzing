@@ -84,12 +84,12 @@ int main (int argc, char *argv[]) {
             close(crashes_fd);
             exit(1);
         }
-
-        char fuzzing_buf[MAX_FUZZ_LENGTH];
-        int fuzzing_len = 0;
+        
+        char unstructured_buf[MAX_FUZZ_LENGTH];
+        int unstructured_len = 0;
 
         do {
-            ret = read(file_fd, &fuzzing_buf[fuzzing_len], MAX_FUZZ_LENGTH - fuzzing_len);
+            ret = read(file_fd, &unstructured_buf[unstructured_len], MAX_FUZZ_LENGTH - unstructured_len);
             if (ret < 0) {
                 printf("Failed to read file: error %i, %s\n", errno, strerror(errno));
                 close(crashes_fd);
@@ -97,10 +97,19 @@ int main (int argc, char *argv[]) {
             } else if (ret == 0) {
                 break;
             } else {
-                fuzzing_len += ret;
+                unstructured_len += ret;
             }
-        } while (fuzzing_len < MAX_FUZZ_LENGTH);
+        } while (unstructured_len < MAX_FUZZ_LENGTH);
     
+        char fuzzing_buf[MAX_FUZZ_LENGTH];
+        long fuzzing_len;
+
+        fuzzing_len = s1ap_arbitrary_to_structured(unstructured_buf, unstructured_len, fuzzing_buf, MAX_FUZZ_LENGTH);
+        if (fuzzing_len < 0) {
+            printf("WARNING: input failed to correctly convert to structured output. Skipping...\n");
+            continue;
+        }
+
 retry_connection:
 
         int canary_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_SCTP);
