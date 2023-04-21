@@ -87,7 +87,7 @@ int main (int argc, char *argv[]) {
 
         char fuzzing_buf[MAX_FUZZ_LENGTH];
         int fuzzing_len = 0;
-
+        int canary_fd;
         do {
             ret = read(file_fd, &fuzzing_buf[fuzzing_len], MAX_FUZZ_LENGTH - fuzzing_len);
             if (ret < 0) {
@@ -100,10 +100,31 @@ int main (int argc, char *argv[]) {
                 fuzzing_len += ret;
             }
         } while (fuzzing_len < MAX_FUZZ_LENGTH);
+
+        int indices[33];
+        int indices_cnt = 0;
+        int offset = 0;
+
+        while (offset < fuzzing_len) {
+            indices[indices_cnt] = offset;
+            if (indices_cnt >= 31) {
+                indices_cnt = 32;
+                break;
+            }
+
+            long size = s1ap_msg_len(&fuzzing_buf[offset], fuzzing_len - offset);
+            if (size <= 0) {
+                indices_cnt += 1;
+                break;
+            }
+
+            indices_cnt += 1;
+            offset += size;
+        }
+        indices[indices_cnt] = fuzzing_len;
     
 retry_connection:
-
-        int canary_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_SCTP);
+        canary_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_SCTP);
         if (canary_fd < 0) {
             printf("Failed to open first SCTP socket: error %i, %s\n", errno, strerror(errno));
             close(crashes_fd);
@@ -207,40 +228,43 @@ retry_connection:
             goto retry_connection;
         }
 
-        ret = write(fd, fuzzing_buf, fuzzing_len);
-        if (ret < 0) {
-            printf("Failed to write fuzzing data: error %i, %s\n", errno, strerror(errno));
-            printf("Sleeping 15 seconds and retrying...\n");
-            close(canary_fd);
-            close(fd);
-            sleep(15);
-            goto retry_connection;
-        } else if (ret == 0) {
-	    printf("Write unexpectedly encountered closed connection\n");
-            printf("Sleeping 15 seconds and retrying...\n");
-	    close(canary_fd);
-	    close(fd);
-	    sleep(15);
-	    goto retry_connection;
-	}
-
-        pfd[0].fd = fd;
-        pfd[0].events = POLLIN;
-        rv = poll(pfd, 1, GENERAL_TIMEOUT_MS);
-        if (rv < 0) {
-            printf("Warning: polling failed: error %i, %s\n", errno, strerror(errno));
-            close(crashes_fd);
-            exit(1);
-        } else if (rv == 0) {
-            printf("Fuzzing response timed out--could indicate crash...\n");   
-        } else {
-            ret = recv(fd, resp, 4096, MSG_DONTWAIT);
+        int i;
+        for (i = 0; i < indices_cnt; i++) {
+            ret = write(fd, &fuzzing_buf[indices[i]], indices[i+1] - indices[i]);
             if (ret < 0) {
-                printf("Failed to read fuzzing response: error %i, %s\n", errno, strerror(errno));
+                printf("Failed to write fuzzing data: error %i, %s\n", errno, strerror(errno));
+                printf("Sleeping 15 seconds and retrying...\n");
                 close(canary_fd);
                 close(fd);
+                sleep(15);
+                goto retry_connection;
             } else if (ret == 0) {
-                printf("Socket unexpectedly closed after writing fuzzing data\n");
+                printf("Write unexpectedly encountered closed connection\n");
+                    printf("Sleeping 15 seconds and retrying...\n");
+                close(canary_fd);
+                close(fd);
+                sleep(15);
+                goto retry_connection;
+            }
+
+            pfd[0].fd = fd;
+            pfd[0].events = POLLIN;
+            rv = poll(pfd, 1, 50);
+            if (rv < 0) {
+                printf("Warning: polling failed: error %i, %s\n", errno, strerror(errno));
+                close(crashes_fd);
+                exit(1);
+            } else if (rv == 0) {
+                printf("No response for msg %i...\n", i+1);
+            } else {
+                ret = recv(fd, resp, 4096, MSG_DONTWAIT);
+                if (ret < 0) {
+                    printf("Failed to read fuzzing response: error %i, %s\n", errno, strerror(errno));
+                    close(canary_fd);
+                    close(fd);
+                } else if (ret == 0) {
+                    printf("Socket unexpectedly closed after writing fuzzing data\n");
+                }
             }
         }
         
