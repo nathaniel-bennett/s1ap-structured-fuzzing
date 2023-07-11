@@ -7,6 +7,24 @@ use std::os::raw::{c_char, c_uint};
 use arbitrary::{Arbitrary, Unstructured};
 
 
+#[cfg(test)]
+mod tests {
+    use hex::FromHex;
+    use crate::s1ap;
+    use asn1_codecs::aper::AperCodec;
+
+    #[test]
+    fn malformed_1() {
+        env_logger::init();
+        let bytes = Vec::from_hex("e023ff3c46dd525400594cf60800450200a40003400040842121ac10020a0a8c600a83378e3c0fd333e2268197ef000300829da6487e00000001000000000028406e0000040136400403e85abc0081401d00bcbcbc4000000000bcbcbcbcbc00bcbcbc400000000064bcbcbcbc400081401d00bcbcbc4000000000bcbcbcbcbc00bcbcbc4000000000bcbcbcbcbc400081401d00bcbcbc4000000000bcbcbcbcbc00bcbcbc4004000000bcbcbcbcbc400000").expect("invalid hex");
+        let mut data = asn1_codecs::PerCodecData::from_slice_aper(bytes.as_slice());
+        let decoded = match s1ap::S1AP_PDU::aper_decode(&mut data) {
+            Ok(val) => print!("{:?}", val),
+            Err(e) => print!("{:?}", e),
+        };
+    }
+}
+
 /// An arbitrary sequence of messages
 #[derive(Debug)]
 struct OgsMessages(Vec<s1ap::S1AP_PDU>);
@@ -27,6 +45,11 @@ const S1AP_ERR_INVALID_ARG: isize = -2;
 const S1AP_ERR_ARBITRARY_FAIL: isize = -3;
 const S1AP_ERR_APER_ENCODING: isize = -4;
 const S1AP_ERR_OUTPUT_TRUNC: isize = -5;
+const S1AP_ERR_EXCLUDED_PDU: isize = -6;
+
+const INITIATING_MESSAGE_EXCL_ID: usize = 1 << 8;
+const SUCCESSFUL_OUTCOME_EXCL_ID: usize = 2 << 8;
+const UNSUCCESSFUL_OUTCOME_EXCL_ID: usize = 3 << 8;
 
 #[no_mangle]
 pub unsafe extern "C" fn s1ap_arbitrary_to_structured(buf_in: *mut c_char, in_len: isize, buf_out: *mut c_char, out_max: isize) -> isize {
@@ -47,6 +70,64 @@ pub unsafe extern "C" fn s1ap_arbitrary_to_structured(buf_in: *mut c_char, in_le
         Ok(msg) => msg,
         Err(_) => return S1AP_ERR_ARBITRARY_FAIL,
     };
+
+    let mut encoded = asn1_codecs::PerCodecData::new_aper();
+    match s1ap_message.aper_encode(&mut encoded) {
+        Ok(()) => (),
+        _ => return S1AP_ERR_APER_ENCODING // If the encoding isn't successful, short-circuit this test
+    }
+
+    let aper_message_bytes = encoded.into_bytes();
+    let aper_message_slice = aper_message_bytes.as_slice();
+    if aper_message_slice.len() > out_max {
+        return S1AP_ERR_OUTPUT_TRUNC
+    }
+
+    out_slice[..aper_message_slice.len()].copy_from_slice(aper_message_slice);
+
+    match aper_message_slice.len().try_into() {
+        Ok(l) => l,
+        Err(_) => S1AP_ERR_OUTPUT_TRUNC
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn s1ap_arbitrary_to_structured_exclude(buf_in: *mut c_char, in_len: isize, pdus: *mut isize, pdus_len: isize, buf_out: *mut c_char, out_max: isize) -> isize {
+    let pdus_len: usize = match pdus_len.try_into() {
+        Ok(l) => l,
+        Err(_) => return S1AP_ERR_INVALID_ARG
+    };
+
+    let in_len: usize = match in_len.try_into() {
+        Ok(l) => l,
+        Err(_) => return S1AP_ERR_INVALID_ARG,
+    };
+
+    let out_max: usize = match out_max.try_into() {
+        Ok(l) => l,
+        Err(_) => return S1AP_ERR_INVALID_ARG,
+    };
+
+    let in_slice = std::slice::from_raw_parts(buf_in as *const u8, in_len);
+    let pdus_slice = std::slice::from_raw_parts(pdus as *const usize, pdus_len);
+    let out_slice = std::slice::from_raw_parts_mut(buf_out as *mut u8, out_max);
+
+    let s1ap_message = match s1ap::S1AP_PDU::arbitrary(&mut Unstructured::new(in_slice)) {
+        Ok(msg) => msg,
+        Err(_) => return S1AP_ERR_ARBITRARY_FAIL,
+    };
+
+    let pdu_id = match &s1ap_message {
+        s1ap::S1AP_PDU::InitiatingMessage(init_msg) => INITIATING_MESSAGE_EXCL_ID + init_msg.procedure_code.0 as usize,
+        s1ap::S1AP_PDU::SuccessfulOutcome(success_msg) => SUCCESSFUL_OUTCOME_EXCL_ID + success_msg.procedure_code.0 as usize,
+        s1ap::S1AP_PDU::UnsuccessfulOutcome(unsuccess_msg) => UNSUCCESSFUL_OUTCOME_EXCL_ID + unsuccess_msg.procedure_code.0 as usize,
+    };
+
+    for excluded_pdu in pdus_slice {
+        if pdu_id == *excluded_pdu {
+            return S1AP_ERR_EXCLUDED_PDU
+        }
+    }
 
     let mut encoded = asn1_codecs::PerCodecData::new_aper();
     match s1ap_message.aper_encode(&mut encoded) {
